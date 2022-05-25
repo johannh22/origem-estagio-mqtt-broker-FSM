@@ -23,7 +23,6 @@ from paho import mqtt
 from env_codes import *
 
 STATES = [("off"), "on", "drawer_open", "running"]
-# STATES = list(zip((i for i in range(4)), ["off", "on", "drawer_open", "running"]))
 
 class MotoClient(paho.Client):
     def __init__(self, client_id=CLIENT_ID,
@@ -50,7 +49,7 @@ class MotoClient(paho.Client):
 
 # Moto inherits from MotoClient in order to use MQTT
 class Moto(MotoClient):
-    def __init__(self, fab):
+    def __init__(self, fab, supplier):
         super().__init__()
         self.fab = fab
         # random string with 17 chars
@@ -60,8 +59,12 @@ class Moto(MotoClient):
         self.topic = f"bike/telemetry/{self.chassi}"
         self.subscribe("bike/telemetry/#")
         self.bat = None
-        self.state = 0
+        self.state = "off"
         self.km = 0
+        self.supplier = supplier
+
+    def get_state(self):
+        return self.state
 
     def communicate(self):
         """Update data then publish telemetry"""
@@ -71,12 +74,13 @@ class Moto(MotoClient):
             self.data), qos=1, retain=True)
         self.loop_stop()
 
-    def ask_for_bat(self, supplier):
+    def ask_for_bat(self):
         if self.state != "drawer_open":
             print("Please open drawer first")
         else:
-            self.bat = supplier.supply_bat()
+            self.bat = self.supplier.supply_bat()
             self.set_data()
+            print("Battery successfuly inserted")
 
     def remove_bat(self):
         if self.state != "drawer_open":
@@ -93,35 +97,79 @@ class Moto(MotoClient):
         return self.data
 
     def off(self):
+        print("Turning motorcycle off")
         self.state = "off"
 
     def on(self):
         if self.state == "off":
+            print("Turning motorcycle on")
             self.state = "on"
+        else:
+            print("Motorcycle already on")
 
     def open_drawer(self):
         if self.state == "on":
+            print("Opening drawer")
             self.state = "drawer_open"
+        elif self.state == "off":
+            print("Please, turn motorcycle on first")
+        elif self.state == "drawer_open":
+            print("Drawer already open")
+
+    def close_drawer(self):
+        if self.state == "drawer_open":
+            print("Closing drawer")
+            self.state = "on"
+        else:
+            print("Drawer already closed")
 
     def ignite(self):
-        if not self.bat:
+        if self.state == "off":
+            print("Motorcycle must be turned on first")
+        elif not self.bat:
             print("Please insert battery first")
         elif self.state == "on":
+            print("Engines on, power up!")
             self.state = "running"
             self.run()
+        elif self.state == "drawer_open":
+            print("Drawer must be closed first")
 
     def run(self):
-        while True:
-            time.sleep(5)
-            self.soc -= 1
+        """Function that runs the motorcycle. I tried some solutions to make
+        the keyboard control this process, but couldn't get around the problem
+        related tracking and time and simultaneously monitoring the keyboard. I
+        tried using pynput and learning multithreading for this, but didn't get
+        to a nice solution. If you guys know any, please tell me =)
+        The most succint way I found was to just ask every 15 seconds if the
+        user wants to change the state, although I don't like the idea of pausing the program so often..."""
+        print("Motorcycle running")
+        stop = False
+        count = 0
+        while not stop:
+            time.sleep(5)  # wait 5 seconds
+            count += 1
+            self.bat.soc -= 1
             self.km += 1
             self.communicate()
-            if self.soc == 10:
+            if self.bat.soc == 10:
                 print("Battery percentage running low, now 10%. Please charge.")
-            elif self.soc == 0:
-                print("Battery out of charge. Turning motorcycle off.")
-                self.state == "off"
-                break
+            elif self.bat.soc == 0:
+                print("Battery out of charge.")
+                self.off()
+                stop = True
+            elif count == 3:
+                count = 0
+                action = input(
+                    "Do you want to change state?\n- 'o' + 'enter' for 'off'\n- 'p' + 'enter' for 'on'\n- any other key + 'enter' to continue\n")
+                if action == 'o':
+                    self.off()
+                    stop = True
+                elif action == 'p':
+                    self.on()
+                    stop = True
+                else:
+                    print("Heading out to the highway!")
 
 
 class Bateria:
@@ -134,9 +182,10 @@ class Fabrica:
     def __init__(self):
         self.motos = 0
 
-    def make_moto(self):
+    def make_moto(self, supplier):
+        # Tie the supplier to the motorcycle
         self.motos += 1
-        return Moto(self)
+        return Moto(self, supplier)
 
 
 class Fornecedor:
