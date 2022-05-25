@@ -17,10 +17,13 @@
 import json
 import string
 import random
+import time
 import paho.mqtt.client as paho
 from paho import mqtt
 from env_codes import *
 
+STATES = [("off"), "on", "drawer_open", "running"]
+# STATES = list(zip((i for i in range(4)), ["off", "on", "drawer_open", "running"]))
 
 class MotoClient(paho.Client):
     def __init__(self, client_id=CLIENT_ID,
@@ -57,20 +60,30 @@ class Moto(MotoClient):
         self.topic = f"bike/telemetry/{self.chassi}"
         self.subscribe("bike/telemetry/#")
         self.bat = None
+        self.state = 0
+        self.km = 0
 
     def communicate(self):
+        """Update data then publish telemetry"""
+        self.set_data()
         self.loop_start()
         self.publish(self.topic, payload=json.dumps(
             self.data), qos=1, retain=True)
         self.loop_stop()
 
     def ask_for_bat(self, supplier):
-        self.bat = supplier.supply_bat()
-        self.set_data()
+        if self.state != "drawer_open":
+            print("Please open drawer first")
+        else:
+            self.bat = supplier.supply_bat()
+            self.set_data()
 
     def remove_bat(self):
-        self.bat = None
-        self.data = {}
+        if self.state != "drawer_open":
+            print("Please open drawer first")
+        else:
+            self.bat = None
+            self.data = {}
 
     def set_data(self):
         if self.bat:
@@ -79,11 +92,42 @@ class Moto(MotoClient):
     def get_data(self):
         return self.data
 
+    def off(self):
+        self.state = "off"
+
+    def on(self):
+        if self.state == "off":
+            self.state = "on"
+
+    def open_drawer(self):
+        if self.state == "on":
+            self.state = "drawer_open"
+
+    def ignite(self):
+        if not self.bat:
+            print("Please insert battery first")
+        elif self.state == "on":
+            self.state = "running"
+            self.run()
+
+    def run(self):
+        while True:
+            time.sleep(5)
+            self.soc -= 1
+            self.km += 1
+            self.communicate()
+            if self.soc == 10:
+                print("Battery percentage running low, now 10%. Please charge.")
+            elif self.soc == 0:
+                print("Battery out of charge. Turning motorcycle off.")
+                self.state == "off"
+                break
+
 
 class Bateria:
     def __init__(self):
         self.id = random.randint(1000, 9999)
-        self.soc = "fully charged"
+        self.soc = 100
 
 
 class Fabrica:
