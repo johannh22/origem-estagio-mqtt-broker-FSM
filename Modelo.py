@@ -68,6 +68,10 @@ class Moto(MotoClient):
         self.bat = supplier.supply_bat()
         self.set_data()
 
+    def remove_bat(self):
+        self.bat = None
+        self.data = {}
+
     def set_data(self):
         if self.bat:
             self.data = {"id": self.bat.id, "soc": self.bat.soc}
